@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
+#include "lpms.h"
+
 
 void dump(uint8_t * buff, uint32_t size)
 {
@@ -15,13 +18,13 @@ void dump(uint8_t * buff, uint32_t size)
 }
 
 
-void serial_open(uint8_t * portname, uint32_t baudrate, int * p_fd)
+uint32_t serial_open(uint8_t * portname, uint32_t baudrate, int * p_fd)
 {
     struct termios options;
-    
+
     *p_fd = open(portname, O_RDWR | O_NONBLOCK | O_NDELAY);
     if (*p_fd == -1) {
-        perror("serial open: unable to open \n");
+        return LPMS_ERR_PORT;
     }
     else
     {
@@ -52,27 +55,52 @@ void serial_open(uint8_t * portname, uint32_t baudrate, int * p_fd)
 
     tcsetattr(*p_fd, TCSANOW, &options);
 
+
+    return LPMS_SUCCESS;
 }
 
-typedef struct test
+void * idler(void * p)
 {
-    uint32_t    temporary;
-    uint32_t    temp2;
-} test_t;
+    uint8_t buff[100];
+    int i;
+    lpms_t * p_lpms;
+    p_lpms = (lpms_t *)p;
+
+    int count;
+    (void)(i);
+    while (1) {
+        count=read(p_lpms->fd,buff,50);
+        dump(buff,count);
+    }
 
 
-test_t temp;
-int fd;
-
-void main(void) {
-    int n;
-    uint8_t buff[10];
-
-    serial_open("/dev/ttyUSB0",B921600,&fd);
-
-    n =  read(fd, &buff, 10);
-    printf("%d bytes read\n",n);
-    dump(&buff[0],n);
-   close(fd);
 
 }
+
+uint32_t lpms_init(uint8_t * p_portname, lpms_t * p_lpms)
+{
+    uint32_t err;
+    err=serial_open(p_portname,B921600,&p_lpms->fd);
+
+    if (err!=LPMS_SUCCESS) {
+        return err;
+    }
+
+    pthread_create(&p_lpms->pt_handle,NULL, &idler,(void *) p_lpms);
+
+    return LPMS_SUCCESS;
+}
+
+uint32_t lpms_stop(lpms_t * p_lpms) {
+
+    pthread_join(p_lpms->pt_handle, NULL);
+    printf("Thread done\n");
+    return LPMS_SUCCESS;
+}
+
+
+
+
+
+
+
