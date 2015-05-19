@@ -5,11 +5,11 @@
 
 lpms_t m_lpms;
 
-void main(void)
+int main(void)
 {
     uint32_t err;
 
-    err=lpms_init("/dev/ttyUSB0",&m_lpms);
+    err=lpms_init("/dev/cu.usbserial-A4004fsl",&m_lpms);
     if (err!=LPMS_SUCCESS) {
         printf("oh crap, something bombed\n");
     } else {
@@ -17,4 +17,5 @@ void main(void)
     }
 
     lpms_stop(&m_lpms);
+    return 0;
 }
