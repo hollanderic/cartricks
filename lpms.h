@@ -7,17 +7,19 @@
 
 #define LPMS_ERR_PORT 1
 
-
+#define LPMS_HEADER_SIZE 7
 
 typedef enum {
     LPMS_STATE_IDLE,
     LPMS_STATE_HEADER,
-    LPMS_STATE_PACKET
+    LPMS_STATE_PACKET,
+    LPMS_STATE_DATA,
+    LPMS_STATE_FRAME_COMPLETE,
 } lpms_states_t;
 
 typedef struct lpmsheader
 {
-    uint8_t     start;
+    uint16_t     start;
     uint16_t    openmat_id;
     uint16_t    command;
     uint16_t    length;

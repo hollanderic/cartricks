@@ -23,10 +23,17 @@ lpms_states_t   state=LPMS_STATE_IDLE;
 void dump(uint8_t * buff, uint32_t size)
 {
     int i;
+    printf("%d bytes:",size);
     for ( i=0 ; i<size ; i++) {
         printf("%02x",(uint8_t)buff[i]);
     }
     printf("\n");
+}
+
+void dumpheader() {
+    printf("start:%x  id:%x    command:%x  length:%x\n",curr_frame.header.start, curr_frame.header.openmat_id,curr_frame.header.command, curr_frame.header.length);
+
+
 }
 
 
@@ -72,6 +79,23 @@ uint32_t serial_open(const char * portname, uint32_t baudrate, int * p_fd)
     return LPMS_SUCCESS;
 }
 
+static inline uint16_t datacpy(uint8_t * p_buff, lpms_frame_t * p_frame, uint16_t ptr) {
+    memcpy(&(p_frame->data),p_buff+ptr,p_frame->header.length);
+    ptr = ptr + p_frame->header.length;
+    p_frame->crc = buff[ptr] + (buff[ptr+1] << 8) ;
+    p_frame->ender = buff[ptr+2] + (buff[ptr+3] << 8);
+    return p_frame->header.length + 4 ;
+}
+
+static inline uint16_t readheader(uint8_t * p_buff, lpms_frame_t * p_frame, uint16_t ptr) {
+    p_frame->header.start = p_buff[ptr];
+    p_frame->header.openmat_id = p_buff[ptr+1] + (p_buff[ptr+2] << 8);
+    p_frame->header.command = p_buff[ptr+3] + (p_buff[ptr+4] << 8);
+    p_frame->header.length = p_buff[ptr+5] + (p_buff[ptr+6] << 8);
+    return LPMS_HEADER_SIZE;
+}
+
+
 void * idler(void * p)
 {
     int i,ptr;
@@ -86,7 +110,9 @@ void * idler(void * p)
         if (count<0) {
             pthread_exit(NULL);
         } else {
+            printf("\n\nStarting: read %d bytes.  State:%d\n",count,(int)p_lpms->state);
             tail = tail + count;
+            dump(buff,tail);
             switch (p_lpms->state) {
 
             case LPMS_STATE_IDLE:
@@ -94,23 +120,27 @@ void * idler(void * p)
                 while ((p_lpms->state==LPMS_STATE_IDLE) && (i<tail)) {
                     if ( (buff[i]==0x3A) && (buff[i+1]==0x01)
                                          && (buff[i+2]==0x00)) {
-                        if ((tail-i) >= sizeof(lpms_header_t)) {
-                            memcpy(&(curr_frame.header), &buff[i],
-                                        sizeof(lpms_header_t));
-                            if ((tail-i) >= (sizeof(lpms_header) +current_header.length+4)) {
-                                    ptr = i + sizeof(lpms_header_t);
-                                    memcpy(&(curr_frame.data),&buff[ptr],curr_frame.header.length);
-                                    ptr = ptr + curr_frame.header.length;
-                                    curr_frame.crc = buff[ptr] + buff[ptr+1] << 8;
-                                    curr_frame.ender = buff[ptr +2] + buff[ptr + 3] << 8;
-                                    printf("Got Full Packet!\n");
-                                    memcpy(buff, &(buff[ptr+4]),tail-(ptr+4));
-                                    tail = tail - (ptr+4);
-                            } else {
+                        printf("Got sync at %d\n",i);
+                        if ((tail-i) >= LPMS_HEADER_SIZE) {
+                            ptr=readheader( buff, &curr_frame, i);
+                            printf("Got full header\n");
+                            dump((uint8_t *)&(curr_frame.header),ptr);
+                            dumpheader();
+                            if ((tail-i) >= ( ptr + curr_frame.header.length+4)) {
+                                    ptr=datacpy(buff,&curr_frame, i + LPMS_HEADER_SIZE);
+                                    printf("Got Full Packet! %d bytes\n",ptr);
 
-                                p_lpms->state = LPMS_STATE_FRAME; //wait for rest of frame
+                                    memcpy(buff, &(buff[i+ptr]),tail - i - ptr);
+                                    tail = tail - ptr - i;
+                                    p_lpms->state = LPMS_STATE_FRAME_COMPLETE;
+                            } else {
+                                tail = tail - ( i + ptr );
+                                memcpy(&buff, &(buff[i + ptr]),tail);
+                                p_lpms->state = LPMS_STATE_DATA; //wait for rest of frame
+                                printf("moving to LPMS_STATE_FAME\n");
                             }
                         } else {
+                            printf("moving to LPMS_STATE_HEADER\n");
                             //wait for rest of header
                             memcpy(buff,&buff[i],tail-1);
                             tail = tail - i;
@@ -121,6 +151,7 @@ void * idler(void * p)
                     }
                 }
                 if (p_lpms->state == LPMS_STATE_IDLE) {
+                    printf("still looking for sync, trimming buffer\n");
                     if (tail>2) {
                         buff[0] = buff[tail-2];
                         buff[1] = buff[tail-1];
@@ -129,6 +160,26 @@ void * idler(void * p)
                 }
                 break;
             case LPMS_STATE_HEADER:
+                if (tail >= LPMS_HEADER_SIZE) {
+                    readheader(buff, &curr_frame, 0);
+                    dumpheader();
+                    if (tail >= LPMS_HEADER_SIZE + curr_frame.header.length+4) {
+                        ptr = datacpy( buff, &curr_frame, LPMS_HEADER_SIZE);
+                        memcpy(buff, &(buff[ptr]),tail-ptr);
+                        tail = tail - ptr;
+                        p_lpms->state = LPMS_STATE_FRAME_COMPLETE;
+                    } else {
+                        p_lpms->state = LPMS_STATE_DATA;
+                    }
+                }
+                break;
+            case LPMS_STATE_DATA:
+                if (tail >= LPMS_HEADER_SIZE + curr_frame.header.length + 4) {
+                    ptr = datacpy(buff,&curr_frame, LPMS_HEADER_SIZE);
+                    memcpy(buff, &(buff[ptr]),tail-ptr);
+                    tail = tail - ptr;
+                    p_lpms->state = LPMS_STATE_FRAME_COMPLETE;
+                }
                 break;
             default:
                 break;
@@ -137,11 +188,13 @@ void * idler(void * p)
 
 
             }
-
-
-
-
-            printf("Read %d bytes from 0x%x\n",count,fcntl(p_lpms->fd,F_GETFD));
+            if (p_lpms->state == LPMS_STATE_FRAME_COMPLETE) {
+                printf("Got a whole frame\n");
+                p_lpms->state = LPMS_STATE_IDLE;
+            }
+            printf("Ending buff:");
+            dump(buff,tail);
+            //printf("Read %d bytes from 0x%x\n",count,fcntl(p_lpms->fd,F_GETFD));
         }
     }
 }
