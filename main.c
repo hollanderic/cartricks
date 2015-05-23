@@ -8,8 +8,8 @@ lpms_t m_lpms;
 int main(void)
 {
     uint32_t err;
-
-    err=lpms_init("/dev/ttyUSB0",&m_lpms);
+    printf("going in\n");
+    err=lpms_init("/dev/cu.usbserial-A4004fsl",&m_lpms);
     if (err!=LPMS_SUCCESS) {
         printf("oh crap, something bombed\n");
     } else {

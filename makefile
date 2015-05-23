@@ -36,7 +36,7 @@ $(BUILD_DIRECTORY):
 	@mkdir $(BUILD_DIRECTORY)
 
 $(BUILD_DIRECTORY)/%.o: %.c
-	$(CC) $(CFLAGS) -pthread $(INC_PATHS) -c -o $@ $<
+	$(CC) $(CFLAGS) -lpthread $(INC_PATHS) -O3 -c -o $@ $<
 
 clean:
 	@$(RM) -rf $(BUILD_DIRECTORY)
