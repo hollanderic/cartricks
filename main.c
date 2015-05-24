@@ -8,13 +8,15 @@ lpms_t m_lpms;
 int main(void)
 {
     uint32_t err;
-    printf("going in\n");
+    m_lpms.config_flags = 0;
     err=lpms_init("/dev/cu.usbserial-A4004fsl",&m_lpms);
     if (err!=LPMS_SUCCESS) {
         printf("oh crap, something bombed\n");
     } else {
-        printf("Hello World!\n");
+        printf("Successfully opened\n");
     }
+    
+    
 
     lpms_stop(&m_lpms);
     return 0;
