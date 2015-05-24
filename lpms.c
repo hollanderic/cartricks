@@ -105,66 +105,48 @@ static inline uint16_t readheader(uint8_t * p_buff, lpms_frame_t * p_frame, uint
 }
 
 
-void  idler(void * p)
+void *  idler(void * p)
 {
     int i,ptr;
     lpms_t * p_lpms;
     p_lpms = (lpms_t *)p;
     uint8_t tempbuff[256];
-    uint64_t tt;
     
     uint32_t seq=0;
     int done=0;
 
     int count;
     (void)(i);
-    //sleep(2);
-    //tcflush(p_lpms->fd,TCIOFLUSH);
-    tt=gettime();    
+
     while (1) {
         seq++;
-        printf("\n\n%d LOOPTOP dt=%llu\n",seq,gettime() - tt);
-        tt=gettime();
         count = read(p_lpms->fd,&buff[tail],500);
         done=0;
-        printf("dt=%llu\n",gettime() - tt);
         if (count<0) {
             pthread_exit(NULL);
         } else {
-            printf("Starting: read %d bytes.  State:%d\n",count,(int)p_lpms->state);
-            printf("First print dt=%llu\n",gettime() - tt);
             tail = tail + count;
-            //dump(buff,tail);
             while (done==0) {
                 switch (p_lpms->state) {
-
                     case LPMS_STATE_IDLE:
                         i=0;
                         while ((p_lpms->state==LPMS_STATE_IDLE) && (i<tail)) {
                             if ( (buff[i]==0x3A) && (buff[i+1]==0x01)
                                                  && (buff[i+2]==0x00)) {
-                                printf("Got sync at %d\n",i);
                                 if ((tail-i) >= LPMS_HEADER_SIZE) {
                                     ptr=readheader( buff, &curr_frame, i);
-                                    //printf("Got full header\n");
-                                    //dump((uint8_t *)&(curr_frame.header),ptr);
-                                    //dumpheader();
                                     if ((tail-i) >= ( ptr + curr_frame.header.length+4)) {
                                             ptr=datacpy(buff,&curr_frame, i + LPMS_HEADER_SIZE);
-                                            //printf("Got Full Packet! %d bytes  tail=%d   i=%d\n",ptr,tail,i);
                                             tail = tail - ptr - i - LPMS_HEADER_SIZE;
                                             memcpy(buff, &(buff[i+ptr+LPMS_HEADER_SIZE]),tail);
                                             p_lpms->state = LPMS_STATE_FRAME_COMPLETE;
                                     } else {
-                                        tail = tail - ( i + ptr );
-                                        memcpy(&buff, &(buff[i + ptr]),tail);
+                                        tail = tail - ( i );
+                                        memcpy(&buff, &(buff[i ]),tail);
                                         p_lpms->state = LPMS_STATE_DATA; //wait for rest of frame
                                         done=1;
-                                        //printf("moving to LPMS_STATE_FAME\n");
                                     }
                                 } else {
-                                    //printf("moving to LPMS_STATE_HEADER\n");
-                                    //wait for rest of header
                                     memcpy(buff,&buff[i],tail-1);
                                     tail = tail - i;
                                     p_lpms->state=LPMS_STATE_HEADER;
@@ -175,7 +157,6 @@ void  idler(void * p)
                             }
                         }
                         if (p_lpms->state == LPMS_STATE_IDLE) {
-                            //printf("still looking for sync, trimming buffer\n");
                             if (tail>2) {
                                 buff[0] = buff[tail-2];
                                 buff[1] = buff[tail-1];
@@ -183,13 +164,11 @@ void  idler(void * p)
                             }
                             done=1;
                         }
-                        printf("IDLE DONE dt=%llu\n",gettime() - tt);
 
                         break;
                     case LPMS_STATE_HEADER:
                         if (tail >= LPMS_HEADER_SIZE) {
                             readheader(buff, &curr_frame, 0);
-                            dumpheader();
                             if (tail >= LPMS_HEADER_SIZE + curr_frame.header.length+4) {
                                 ptr = datacpy( buff, &curr_frame, LPMS_HEADER_SIZE);
                                 memcpy(buff, &(buff[ptr]),tail-ptr);
@@ -215,15 +194,12 @@ void  idler(void * p)
                     default:
                         break;
                 }
+                if (p_lpms->state == LPMS_STATE_FRAME_COMPLETE) {
+                    printf("%02X:",curr_frame.header.command);
+                    dump(curr_frame.data,30);
+                    p_lpms->state = LPMS_STATE_IDLE;
+                }
             }
-            if (p_lpms->state == LPMS_STATE_FRAME_COMPLETE) {
-                printf("Got a whole frame\n");
-                p_lpms->state = LPMS_STATE_IDLE;
-            }
-            //printf("Ending buff:");
-            dump(buff,tail);
-            printf("Read %d bytes from 0x%x\n",count,fcntl(p_lpms->fd,F_GETFD));
-            printf("LOOP DONE dt=%llu\n",gettime() - tt);
         }
     }
 }
@@ -243,8 +219,7 @@ uint32_t lpms_init(const char * portname, lpms_t * p_lpms)
         return err;
     }
 
-    //pthread_create(&p_lpms->pt_handle,NULL, &idler,(void *) p_lpms);
-    idler((void *) p_lpms);
+    pthread_create(&p_lpms->pt_handle,NULL, &idler,(void *) p_lpms);
     return LPMS_SUCCESS;
 }
 
@@ -257,29 +232,5 @@ uint32_t lpms_stop(lpms_t * p_lpms) {
     printf("Thread done\n");
     return LPMS_SUCCESS;
 }
-
-
-
-lpms_t m_lpms;
-
-int main(void) {
-
-
-    uint32_t err;
-    printf("going in\n");
-    err=lpms_init("/dev/cu.usbserial-A4004fsl",&m_lpms);
-    if (err!=LPMS_SUCCESS) {
-        printf("oh crap, something bombed\n");
-    } else {
-        printf("Hello World!\n");
-    }
-
-    return 0;
-
-
-}
-
-
-
 
 
