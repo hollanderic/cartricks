@@ -10,6 +10,7 @@ RM	:=rm
 C_SOURCE_FILES = \
 ./main.c \
 ./lpms.c \
+./gps.c
 
 CFLAGS += 
 

@@ -24,14 +24,14 @@ void dump(uint8_t * buff, uint32_t size)
 }
 
 void dumpheader(lpms_frame_t * p_frame) {
-    printf("start:0x%x  id:0x%x    command:0x%x  length:%d\n",p_frame->header.start,                             
+    printf("start:0x%x  id:0x%x    command:0x%x  length:%d\n",p_frame->header.start,
         p_frame->header.openmat_id,p_frame->header.command, p_frame->header.length);
 }
 
 uint64_t gettime() {
     struct timeval t;
     uint64_t tt;
-    
+
     gettimeofday(&t,NULL);
     tt = t.tv_sec*1000000 + t.tv_usec;
     return tt;
@@ -40,13 +40,13 @@ uint64_t gettime() {
 uint16_t    calc_crc(lpms_frame_t * p_frame) {
     uint16_t crc=1;     //Initialize with openmatid
     uint16_t i;
-    
+
     crc = crc + p_frame->header.command;
     crc = crc + p_frame->header.length;
     for (i = 0 ; i < p_frame->header.length ; i++ ) {
         crc = crc + p_frame->data[i];
     }
-    
+
     return crc;
 }
 
@@ -55,17 +55,16 @@ uint16_t    frame_to_buff(uint8_t * buff, lpms_frame_t * p_frame) {
 
     buff[0] = (p_frame->header.start ) & 0xFF;
     buff[1] = (p_frame->header.openmat_id     ) & 0xFF;
-    buff[2] = (p_frame->header.openmat_id >> 8) & 0xFF; 
-    
+    buff[2] = (p_frame->header.openmat_id >> 8) & 0xFF;
     buff[3] = (p_frame->header.command     ) & 0xFF;
-    buff[4] = (p_frame->header.command >> 8) & 0xFF; 
+    buff[4] = (p_frame->header.command >> 8) & 0xFF;
     buff[5] = (p_frame->header.length      ) & 0xFF;
     buff[6] = (p_frame->header.length  >> 8) & 0xFF;
-    
+
     memcpy( &buff[7] , p_frame->data, p_frame->header.length);
-    
+
     crc     = calc_crc(p_frame);
-    
+
     buff[ 7 +  p_frame->header.length] = ( crc      ) & 0xFF;
     buff[ 8 +  p_frame->header.length] = ( crc >> 8 ) & 0xFF;
     buff[ 9 +  p_frame->header.length] = 0x0D;
@@ -78,23 +77,32 @@ uint16_t    frame_to_buff(uint8_t * buff, lpms_frame_t * p_frame) {
 uint32_t serial_open(const char * portname, uint32_t baudrate, int * p_fd)
 {
     struct termios options;
+    memset(&options, 0 ,sizeof options);
 
-    *p_fd = open(portname, O_RDWR | O_NOCTTY | O_NDELAY);
+
+    *p_fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
     if (*p_fd == -1) {
-        //printf("error opening %s\n",portname);
+        printf("error opening %s\n",portname);
         return LPMS_ERR_PORT;
     }
     else
     {
-        //printf("file open at %x\n",*p_fd);
+        printf("file open at %x\n",*p_fd);
         fcntl(*p_fd, F_SETFL, 0);
     }
-    tcgetattr(*p_fd,&options);
+
+
+
+
+    if (tcgetattr(*p_fd,&options) != 0) {
+        printf("error from tcgetattr\n");
+    }
+
     cfsetispeed(&options, baudrate);
     cfsetospeed(&options, baudrate);
 
     options.c_cflag |= (CLOCAL | CREAD);
-    options.c_cflag &= ~PARENB;
+    options.c_cflag &= ~(PARENB | PARODD);
     options.c_cflag &= ~CSTOPB;
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;
@@ -110,7 +118,7 @@ uint32_t serial_open(const char * portname, uint32_t baudrate, int * p_fd)
     options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG );
     options.c_oflag &= ~OPOST;
 
-    tcflush(*p_fd, TCIFLUSH );
+    //tcflush(*p_fd, TCIFLUSH );
 
     tcsetattr(*p_fd, TCSANOW, &options);
 
@@ -118,10 +126,10 @@ uint32_t serial_open(const char * portname, uint32_t baudrate, int * p_fd)
 }
 
 static inline uint16_t datacpy(uint8_t * p_buff, lpms_frame_t * p_frame) {
-    
+
     uint16_t ptr;
     memcpy(&(p_frame->data),p_buff,p_frame->header.length);
-    
+
     ptr =  p_frame->header.length;
     p_frame->crc = p_buff[ptr] + (p_buff[ptr+1] << 8) ;
     p_frame->ender = p_buff[ptr+2] + (p_buff[ptr+3] << 8);
@@ -146,7 +154,7 @@ void procframe(lpms_t * p_lpms,lpms_frame_t * p_frame) {
     switch (p_frame->header.command) {
         case LPMS_COMMAND_GET_CONFIG:
             memcpy( &data, p_frame->data, 4);
-            p_lpms->config_flags = data; 
+            p_lpms->config_flags = data;
             printf("0x%08X\n",data);
             if (LPMS_PRESSURE_ENABLED & data) { printf("Pressure enabled\n"); }
             if (LPMS_MAGNETOMETER_ENABLED & data) { printf("Magnetometer enabled\n"); }
@@ -160,7 +168,7 @@ void procframe(lpms_t * p_lpms,lpms_frame_t * p_frame) {
             if (LPMS_ALTITUDE_ENABLED & data) { printf("Altitude enabled\n"); }
             if (LPMS_LINEAR_ACC_ENABLED & data) { printf("Linear acceleration enabled\n"); }
             break;
-            
+
         case LPMS_COMMAND_GET_SENSOR_DATA:
             if (p_lpms->config_flags) {
                 uint16_t i=0;
@@ -239,19 +247,11 @@ void procframe(lpms_t * p_lpms,lpms_frame_t * p_frame) {
                     printf("Heave- %09f\n",p_lpms->data.heave_motion); 
                 }
              } else {
-            
+
             }
             break;
-                    
-            
-            
         default:
             break;
-    
-        
-    
-    
-    
     } //switch
 
 }
@@ -267,15 +267,16 @@ void *  idler(void * p)
     uint32_t seq=0;
     uint8_t done=0;
     uint16_t count;
-        
+
     p_lpms = (lpms_t *)p;
-    
+
     tail=0;
-    
+
     while (1) {
         seq++;
         head=0;
         count = read(p_lpms->fd,&buff[tail],BUFFSIZE-tail);
+        //printf("read %d bytes\n",count);
         done=0;
         if (count<0) {
             pthread_exit(NULL);
@@ -306,7 +307,7 @@ void *  idler(void * p)
                             done=1;
                         }
                         break;
-                                
+
                     case LPMS_STATE_HEADER:
                         if ((tail-head) >= LPMS_HEADER_SIZE) {
                             readheader(&buff[head], &curr_frame);
@@ -327,11 +328,11 @@ void *  idler(void * p)
 
                     case LPMS_STATE_FRAME_COMPLETE:
                         printf("%02X:",curr_frame.header.command);
-                        if (curr_frame.header.length > 0 ) {
-                            dump(curr_frame.data,30);
-                        } else {
-                            printf("----\n");
-                        }
+                        //if (curr_frame.header.length > 0 ) {
+                        //    dump(curr_frame.data,30);
+                        //} else {
+                        //    printf("----\n");
+                        //}
                         procframe(p_lpms,&curr_frame);
                         p_lpms->state = LPMS_STATE_IDLE;
                         head= head + LPMS_HEADER_SIZE + curr_frame.header.length + 4;
@@ -363,23 +364,30 @@ uint32_t lpms_init(const char * portname, lpms_t * p_lpms)
     
     i = frame_to_buff(buff,&frame);
 
-    err=serial_open(portname,921600,&p_lpms->fd);
-
-    write(p_lpms->fd,buff,i);
+    err=serial_open(portname,B921600,&p_lpms->fd);
+    printf("Serial Open returned %d\n",err);
+    err=write(p_lpms->fd,buff,i);
+    tcflush(p_lpms->fd,TCIFLUSH);
+    printf("Got return of %d writing %d bytes\n",err,i);
+    dump(buff,i);
     
     
     frame.header.command = LPMS_COMMAND_GET_CONFIG;
     i = frame_to_buff(buff,&frame);
     write(p_lpms->fd,buff,i);
 
+    tcflush(p_lpms->fd,TCIFLUSH);
+    dump(buff,i);
     frame.header.command = LPMS_COMMAND_GOTO_STREAM_MODE;
     i = frame_to_buff(buff,&frame);
-    write(p_lpms->fd,buff,i);
+    err=write(p_lpms->fd,buff,i);
 
+    tcflush(p_lpms->fd,TCIFLUSH);
+    printf("Got return of %d writing %d bytes\n",err,i);
 
-    if (err!=LPMS_SUCCESS) {
-        return err;
-    }
+//    if (err!=LPMS_SUCCESS) {
+  //      return err;
+ ///   }
 
     pthread_create(&p_lpms->pt_handle,NULL, &idler,(void *) p_lpms);
     return LPMS_SUCCESS;
